@@ -1,0 +1,7 @@
+{
+    "recommendations": [
+        "biomejs.biome", // Biome plugin for formatting
+        "bradlc.vscode-tailwindcss", // Tailwind CSS IntelliSense
+        "dbaeumer.vscode-eslint" // ESLint plugin
+    ]
+}
