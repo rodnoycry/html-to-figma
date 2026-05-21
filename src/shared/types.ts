@@ -80,7 +80,3 @@ interface LetterSpacing {
     value: number
     unit: "PIXELS" | "PERCENT"
 }
-
-export type PluginMessage =
-    | { type: "import"; data: { layers: LayerData } }
-    | { type: "cancel" }

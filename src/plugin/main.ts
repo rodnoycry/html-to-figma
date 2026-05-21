@@ -1,14 +1,12 @@
-import type { PluginMessage } from "../shared/types.ts"
+import { handleMessages, type UIToPluginMessage } from "../shared/messages.ts"
 
 figma.showUI(__html__, { width: 400, height: 300 })
 
-figma.ui.onmessage = async (msg: PluginMessage) => {
-    if (msg.type === "cancel") {
+figma.ui.onmessage = handleMessages<UIToPluginMessage>({
+    cancel() {
         figma.closePlugin()
-        return
-    }
-
-    if (msg.type === "import") {
+    },
+    import(_msg) {
         figma.notify("Import received — processing not yet implemented.")
-    }
-}
+    },
+})

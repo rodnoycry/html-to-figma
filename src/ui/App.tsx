@@ -1,22 +1,19 @@
 import { useState } from "react"
+import type { UIToPluginMessage } from "../shared/messages.ts"
+
+function sendToPlugin(msg: UIToPluginMessage) {
+    parent.postMessage({ pluginMessage: msg }, "*")
+}
 
 export function App() {
     const [url, setUrl] = useState("")
 
     function handleImport() {
-        parent.postMessage(
-            {
-                pluginMessage: {
-                    type: "import",
-                    data: { url },
-                },
-            },
-            "*",
-        )
+        sendToPlugin({ type: "import", url })
     }
 
     function handleCancel() {
-        parent.postMessage({ pluginMessage: { type: "cancel" } }, "*")
+        sendToPlugin({ type: "cancel" })
     }
 
     return (
