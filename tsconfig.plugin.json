@@ -1,0 +1,17 @@
+{
+    "compilerOptions": {
+        "target": "ES2022",
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+        "lib": ["ES2022"],
+        "types": [],
+        "typeRoots": ["./node_modules/@types", "./node_modules/@figma"],
+        "strict": true,
+        "skipLibCheck": true,
+        "noEmit": true,
+        "verbatimModuleSyntax": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true
+    },
+    "include": ["src/plugin/**/*.ts", "src/shared/**/*.ts"]
+}

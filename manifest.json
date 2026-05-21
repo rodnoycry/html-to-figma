@@ -1,0 +1,14 @@
+{
+    "name": "HTML to Figma",
+    "id": "1639269502735459954",
+    "api": "1.0.0",
+    "main": "dist/code.js",
+    "ui": "dist/ui.html",
+    "capabilities": [],
+    "enableProposedApi": false,
+    "documentAccess": "dynamic-page",
+    "editorType": ["figma"],
+    "networkAccess": {
+        "allowedDomains": ["*"]
+    }
+}
