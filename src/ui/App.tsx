@@ -6,6 +6,8 @@ function sendToPlugin(msg: UIToPluginMessage) {
     parent.postMessage({ pluginMessage: msg }, "*")
 }
 
+const DEFAULT_SCREEN_WIDTH = 1600
+
 const SAMPLE_HTML = `<div class="card">
   <h1>Hello Figma</h1>
   <p>Paste your HTML and CSS here.</p>
@@ -26,7 +28,7 @@ p { font-size: 14px; color: #666; }`
 export function App() {
     const [html, setHtml] = useState(SAMPLE_HTML)
     const [css, setCss] = useState(SAMPLE_CSS)
-    const [viewportWidth, setViewportWidth] = useState(800)
+    const [viewportWidth, setViewportWidth] = useState(DEFAULT_SCREEN_WIDTH)
     const [status, setStatus] = useState("")
     const [busy, setBusy] = useState(false)
 
@@ -100,7 +102,7 @@ export function App() {
                         type="number"
                         value={viewportWidth}
                         onChange={(e) =>
-                            setViewportWidth(Number(e.target.value) || 800)
+                            setViewportWidth(Number(e.target.value))
                         }
                         style={{
                             width: 56,
