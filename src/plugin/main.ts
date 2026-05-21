@@ -6,7 +6,7 @@ figma.ui.onmessage = handleMessages<UIToPluginMessage>({
     cancel() {
         figma.closePlugin()
     },
-    import(_msg) {
+    "import-html"(_msg) {
         figma.notify("Import received — processing not yet implemented.")
     },
 })

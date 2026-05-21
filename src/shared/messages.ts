@@ -1,5 +1,5 @@
 interface UIToPluginMessages {
-    import: { url: string }
+    "import-html": { url: string }
     cancel: {}
 }
 

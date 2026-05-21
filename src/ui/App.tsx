@@ -9,7 +9,7 @@ export function App() {
     const [url, setUrl] = useState("")
 
     function handleImport() {
-        sendToPlugin({ type: "import", url })
+        sendToPlugin({ type: "import-html", url })
     }
 
     function handleCancel() {
