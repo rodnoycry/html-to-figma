@@ -1,5 +1,7 @@
+import type { LayerData } from "./types.ts"
+
 interface UIToPluginMessages {
-    "import-html": { url: string }
+    "import-html": { layers: LayerData }
     cancel: {}
 }
 

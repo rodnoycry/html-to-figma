@@ -26,6 +26,8 @@ export interface LayerData {
     textAlignHorizontal?: "LEFT" | "CENTER" | "RIGHT" | "JUSTIFIED"
     lineHeight?: LineHeight
     letterSpacing?: LetterSpacing
+    textDecoration?: "NONE" | "UNDERLINE" | "STRIKETHROUGH"
+    textCase?: "ORIGINAL" | "UPPER" | "LOWER" | "TITLE"
     // Auto-layout properties
     layoutMode?: "HORIZONTAL" | "VERTICAL"
     primaryAxisAlignItems?: "MIN" | "MAX" | "CENTER" | "SPACE_BETWEEN"
