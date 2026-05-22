@@ -1,3 +1,4 @@
+import { Fallback } from "../../shared/fallbacks.ts"
 import type { LayerData } from "../../shared/types.ts"
 import { parseColor } from "./color.ts"
 import {
@@ -62,23 +63,27 @@ function convertElement({
     const autoLayout = extractAutoLayout(computedStyle, authoredStyle)
     const hasBoxVisuals = hasFrameVisuals(computedStyle)
 
-    const childSizing = computeChildSizing(
+    const childSizing = computeChildSizing({
         element,
         computedStyle,
         authoredStyle,
         parentIsAutoLayout,
         parentLayoutMode,
-    )
+    })
 
     if (
-        shouldConvertElementToText(
+        shouldConvertElementToText({
             element,
             computedStyle,
             hasBoxVisuals,
             autoLayout,
-        )
+        })
     ) {
-        const textLayer = makeTextLayerFromElement(element, rect, parentRect)
+        const textLayer = makeTextLayerFromElement({
+            element,
+            rect,
+            parentRect,
+        })
         Object.assign(textLayer, childSizing)
         return textLayer
     }
@@ -149,7 +154,9 @@ function convertElement({
         const input = element as HTMLInputElement | HTMLTextAreaElement
         const text = input.value || input.placeholder
         if (text) {
-            layer.children = [makeTextLayer(text, computedStyle, rect, rect)]
+            layer.children = [
+                makeTextLayer({ text, computedStyle, rect, parentRect: rect }),
+            ]
         }
         return layer
     }
@@ -157,11 +164,13 @@ function convertElement({
     const children: LayerData[] = []
     if (
         !autoLayout &&
-        isTextFlowElement(element, computedStyle) &&
+        isTextFlowElement({ element, computedStyle }) &&
         hasOnlyInlineTextContent(element) &&
         textContent(element)
     ) {
-        children.push(makeTextLayerFromElement(element, rect, rect))
+        children.push(
+            makeTextLayerFromElement({ element, rect, parentRect: rect }),
+        )
     } else {
         for (const child of element.childNodes) {
             if (child.nodeType === Node.ELEMENT_NODE) {
@@ -202,7 +211,7 @@ function convertElement({
         )
         layer.gridRowCount = neededRows
         layer.gridRowSizes = Array.from({ length: neededRows }, (_, index) => {
-            return layer.gridRowSizes?.[index] ?? { type: "HUG" }
+            return layer.gridRowSizes?.[index] ?? Fallback.GRID_ROW_SIZE
         })
     }
     return layer
@@ -238,13 +247,23 @@ function appendElementWithMarginSpacers({
 
     if (before > 0) {
         children.push(
-            makeMarginSpacer(before, parentLayoutMode, "before", element),
+            makeMarginSpacer({
+                size: before,
+                parentLayoutMode,
+                position: "before",
+                element,
+            }),
         )
     }
     children.push(childLayer)
     if (after > 0) {
         children.push(
-            makeMarginSpacer(after, parentLayoutMode, "after", element),
+            makeMarginSpacer({
+                size: after,
+                parentLayoutMode,
+                position: "after",
+                element,
+            }),
         )
     }
 }
@@ -254,12 +273,17 @@ function parseMargin(raw: string): number {
     return Number.isFinite(value) && value > 0 ? Math.round(value) : 0
 }
 
-function makeMarginSpacer(
-    size: number,
-    parentLayoutMode: "HORIZONTAL" | "VERTICAL",
-    position: "before" | "after",
-    el: Element,
-): LayerData {
+function makeMarginSpacer({
+    size,
+    parentLayoutMode,
+    position,
+    element,
+}: {
+    size: number
+    parentLayoutMode: "HORIZONTAL" | "VERTICAL"
+    position: "before" | "after"
+    element: Element
+}): LayerData {
     const side =
         position === "before"
             ? parentLayoutMode === "VERTICAL"
@@ -269,12 +293,12 @@ function makeMarginSpacer(
               ? "bottom"
               : "right"
     return {
-        type: "FRAME",
+        type: "GROUP",
         x: 0,
         y: 0,
         width: parentLayoutMode === "HORIZONTAL" ? size : 1,
         height: parentLayoutMode === "VERTICAL" ? size : 1,
-        name: `margin-${side}.${elementName(el)}`,
+        name: `margin-${side}.${elementName(element)}`,
         layoutSizingHorizontal:
             parentLayoutMode === "HORIZONTAL" ? "FIXED" : "FILL",
         layoutSizingVertical:
@@ -282,25 +306,31 @@ function makeMarginSpacer(
     }
 }
 
-function computeChildSizing(
-    el: Element,
-    cs: CSSStyleDeclaration,
-    authoredStyle: (property: string) => string,
-    parentIsAutoLayout: boolean,
-    parentLayoutMode: "HORIZONTAL" | "VERTICAL",
-): Partial<LayerData> {
+function computeChildSizing({
+    element,
+    computedStyle,
+    authoredStyle,
+    parentIsAutoLayout,
+    parentLayoutMode,
+}: {
+    element: Element
+    computedStyle: CSSStyleDeclaration
+    authoredStyle: (property: string) => string
+    parentIsAutoLayout: boolean
+    parentLayoutMode: "HORIZONTAL" | "VERTICAL"
+}): Partial<LayerData> {
     if (!parentIsAutoLayout) return {}
 
-    if (isOutOfFlow(cs)) {
+    if (isOutOfFlow(computedStyle)) {
         return {
             layoutPositioning: "ABSOLUTE" as const,
-            constraints: extractConstraints(cs),
+            constraints: extractConstraints(computedStyle),
         }
     }
 
     const result: Partial<LayerData> = {}
 
-    const grow = parseFloat(cs.flexGrow) || 0
+    const grow = parseFloat(computedStyle.flexGrow) || 0
     if (grow > 0) {
         result.layoutGrow = grow
         if (parentLayoutMode === "HORIZONTAL") {
@@ -314,7 +344,7 @@ function computeChildSizing(
     const authoredCross = authoredStyle(crossProp).trim()
     if (
         (!authoredCross || authoredCross === "auto") &&
-        resolvesToStretch(el, cs)
+        resolvesToStretch(element, computedStyle)
     ) {
         if (parentLayoutMode === "VERTICAL") {
             result.layoutSizingHorizontal = "FILL"
@@ -348,40 +378,59 @@ function isOutOfFlow(cs: CSSStyleDeclaration): boolean {
     return cs.position === "absolute" || cs.position === "fixed"
 }
 
-function extractConstraints(cs: CSSStyleDeclaration): LayerData["constraints"] {
+function extractConstraints(
+    computedStyle: CSSStyleDeclaration,
+): LayerData["constraints"] {
     return {
-        horizontal: cs.right !== "auto" && cs.left === "auto" ? "MAX" : "MIN",
-        vertical: cs.bottom !== "auto" && cs.top === "auto" ? "MAX" : "MIN",
+        horizontal:
+            computedStyle.right !== "auto" && computedStyle.left === "auto"
+                ? "MAX"
+                : "MIN",
+        vertical:
+            computedStyle.bottom !== "auto" && computedStyle.top === "auto"
+                ? "MAX"
+                : "MIN",
     }
 }
 
-function hasFrameVisuals(cs: CSSStyleDeclaration): boolean {
+function hasFrameVisuals(computedStyle: CSSStyleDeclaration): boolean {
     return !!(
-        extractFills(cs) ||
-        extractStrokes(cs) ||
-        extractCornerRadii(cs) ||
-        extractEffects(cs) ||
-        cs.overflow === "hidden" ||
-        cs.overflow === "clip"
+        extractFills(computedStyle) ||
+        extractStrokes(computedStyle) ||
+        extractCornerRadii(computedStyle) ||
+        extractEffects(computedStyle) ||
+        computedStyle.overflow === "hidden" ||
+        computedStyle.overflow === "clip"
     )
 }
 
-function shouldConvertElementToText(
-    el: Element,
-    cs: CSSStyleDeclaration,
-    hasBoxVisuals: boolean,
-    autoLayout: Partial<LayerData> | undefined,
-): boolean {
+function shouldConvertElementToText({
+    element,
+    computedStyle,
+    hasBoxVisuals,
+    autoLayout,
+}: {
+    element: Element
+    computedStyle: CSSStyleDeclaration
+    hasBoxVisuals: boolean
+    autoLayout: Partial<LayerData> | undefined
+}): boolean {
     if (hasBoxVisuals || autoLayout) return false
-    if (!isTextFlowElement(el, cs)) return false
-    return hasOnlyInlineTextContent(el) && !!textContent(el)
+    if (!isTextFlowElement({ element, computedStyle })) return false
+    return hasOnlyInlineTextContent(element) && !!textContent(element)
 }
 
-function isTextFlowElement(el: Element, cs: CSSStyleDeclaration): boolean {
-    if (isControlElement(el)) return false
-    if (isLayoutDisplay(cs)) return false
+function isTextFlowElement({
+    element,
+    computedStyle,
+}: {
+    element: Element
+    computedStyle: CSSStyleDeclaration
+}): boolean {
+    if (isControlElement(element)) return false
+    if (isLayoutDisplay(computedStyle)) return false
 
-    const tag = el.tagName.toLowerCase()
+    const tag = element.tagName.toLowerCase()
     if (
         [
             "a",
@@ -407,7 +456,10 @@ function isTextFlowElement(el: Element, cs: CSSStyleDeclaration): boolean {
         return true
     }
 
-    return cs.display === "inline" || cs.display === "inline-block"
+    return (
+        computedStyle.display === "inline" ||
+        computedStyle.display === "inline-block"
+    )
 }
 
 function isControlElement(el: Element): boolean {
@@ -452,22 +504,29 @@ function normalizeText(text: string): string {
     return text.replace(/\s+/g, " ").trim()
 }
 
-function makeTextLayerFromElement(
-    el: Element,
-    rect: DOMRect,
-    parentRect: DOMRect,
-): LayerData {
-    const text = textContent(el)
-    const cs = getElementWindow(el).getComputedStyle(el)
-    const layer = makeTextLayer(text, cs, rect, parentRect)
-    layer.textSegments = collectTextSegments(el, text)
+function makeTextLayerFromElement({
+    element,
+    rect,
+    parentRect,
+}: {
+    element: Element
+    rect: DOMRect
+    parentRect: DOMRect
+}): LayerData {
+    const text = textContent(element)
+    const computedStyle = getElementWindow(element).getComputedStyle(element)
+    const layer = makeTextLayer({ text, computedStyle, rect, parentRect })
+    layer.textSegments = collectTextSegments({ element, expectedText: text })
     return layer
 }
 
-function collectTextSegments(
-    el: Element,
-    expectedText: string,
-): LayerData["textSegments"] {
+function collectTextSegments({
+    element,
+    expectedText,
+}: {
+    element: Element
+    expectedText: string
+}): LayerData["textSegments"] {
     const segments: NonNullable<LayerData["textSegments"]> = []
     let cursor = 0
 
@@ -502,24 +561,24 @@ function collectTextSegments(
         }
     }
 
-    visit(el, el)
+    visit(element, element)
     return segments.length > 1 ? segments : undefined
 }
 
 function extractTextStyle(
-    cs: CSSStyleDeclaration,
+    computedStyle: CSSStyleDeclaration,
 ): Omit<NonNullable<LayerData["textSegments"]>[number], "start" | "end"> {
     const style: Omit<
         NonNullable<LayerData["textSegments"]>[number],
         "start" | "end"
     > = {
-        fontSize: Math.round(parseFloat(cs.fontSize)) || 16,
-        fontFamily: extractFontFamily(cs.fontFamily),
-        fontWeight: parseFontWeight(cs.fontWeight),
-        fontStyle: cs.fontStyle === "italic" ? "ITALIC" : "NORMAL",
+        fontSize: Math.round(parseFloat(computedStyle.fontSize)) || 16,
+        fontFamily: extractFontFamily(computedStyle.fontFamily),
+        fontWeight: parseFontWeight(computedStyle.fontWeight),
+        fontStyle: computedStyle.fontStyle === "italic" ? "ITALIC" : "NORMAL",
     }
 
-    const color = parseColor(cs.color)
+    const color = parseColor(computedStyle.color)
     if (color) {
         style.fills = [
             {
@@ -530,32 +589,36 @@ function extractTextStyle(
         ]
     }
 
-    const ls = parseFloat(cs.letterSpacing)
-    if (ls && cs.letterSpacing !== "normal") {
+    const ls = parseFloat(computedStyle.letterSpacing)
+    if (ls && computedStyle.letterSpacing !== "normal") {
         style.letterSpacing = { value: ls, unit: "PIXELS" }
     }
 
-    if (cs.textDecorationLine.includes("underline")) {
+    if (computedStyle.textDecorationLine.includes("underline")) {
         style.textDecoration = "UNDERLINE"
-    } else if (cs.textDecorationLine.includes("line-through")) {
+    } else if (computedStyle.textDecorationLine.includes("line-through")) {
         style.textDecoration = "STRIKETHROUGH"
     }
 
-    if (cs.textTransform === "uppercase") style.textCase = "UPPER"
-    else if (cs.textTransform === "lowercase") style.textCase = "LOWER"
-    else if (cs.textTransform === "capitalize") style.textCase = "TITLE"
+    if (computedStyle.textTransform === "uppercase") style.textCase = "UPPER"
+    else if (computedStyle.textTransform === "lowercase")
+        style.textCase = "LOWER"
+    else if (computedStyle.textTransform === "capitalize")
+        style.textCase = "TITLE"
 
     return style
 }
 
-function createAuthoredStyleGetter(el: Element): (property: string) => string {
-    const doc = el.ownerDocument
+function createAuthoredStyleGetter(
+    element: Element,
+): (property: string) => string {
+    const doc = element.ownerDocument
     const rules = collectStyleRules(doc)
     return (property: string) => {
         let value = ""
         for (const rule of rules) {
             try {
-                if (el.matches(rule.selectorText)) {
+                if (element.matches(rule.selectorText)) {
                     value = rule.style.getPropertyValue(property) || value
                 }
             } catch {
@@ -568,13 +631,13 @@ function createAuthoredStyleGetter(el: Element): (property: string) => string {
 
 function collectStyleRules(doc: Document): CSSStyleRule[] {
     const result: CSSStyleRule[] = []
-    const w = getElementWindow(doc.documentElement)
+    const elementWindow = getElementWindow(doc.documentElement)
     const visit = (rules: CSSRuleList) => {
         for (const rule of Array.from(rules)) {
-            if (rule instanceof w.CSSStyleRule) {
+            if (rule instanceof elementWindow.CSSStyleRule) {
                 result.push(rule)
-            } else if (rule instanceof w.CSSMediaRule) {
-                if (w.matchMedia(rule.conditionText).matches) {
+            } else if (rule instanceof elementWindow.CSSMediaRule) {
+                if (elementWindow.matchMedia(rule.conditionText).matches) {
                     visit(rule.cssRules)
                 }
             }
@@ -610,16 +673,22 @@ function convertTextNode({
 
     if (rect.width < 0.5 || rect.height < 0.5) return null
 
-    const cs = getElementWindow(parentElement).getComputedStyle(parentElement)
-    return makeTextLayer(text, cs, rect, parentRect)
+    const computedStyle =
+        getElementWindow(parentElement).getComputedStyle(parentElement)
+    return makeTextLayer({ text, computedStyle, rect, parentRect })
 }
 
-function makeTextLayer(
-    text: string,
-    cs: CSSStyleDeclaration,
-    rect: DOMRect,
-    parentRect: DOMRect,
-): LayerData {
+function makeTextLayer({
+    text,
+    computedStyle,
+    rect,
+    parentRect,
+}: {
+    text: string
+    computedStyle: CSSStyleDeclaration
+    rect: DOMRect
+    parentRect: DOMRect
+}): LayerData {
     const layer: LayerData = {
         type: "TEXT",
         x: Math.round(rect.left - parentRect.left),
@@ -627,10 +696,10 @@ function makeTextLayer(
         width: Math.ceil(rect.width),
         height: Math.ceil(rect.height),
         characters: text,
-        fontSize: Math.round(parseFloat(cs.fontSize)) || 16,
-        fontFamily: extractFontFamily(cs.fontFamily),
-        fontWeight: parseFontWeight(cs.fontWeight),
-        fontStyle: cs.fontStyle === "italic" ? "ITALIC" : "NORMAL",
+        fontSize: Math.round(parseFloat(computedStyle.fontSize)) || 16,
+        fontFamily: extractFontFamily(computedStyle.fontFamily),
+        fontWeight: parseFontWeight(computedStyle.fontWeight),
+        fontStyle: computedStyle.fontStyle === "italic" ? "ITALIC" : "NORMAL",
     }
 
     const alignMap: Record<string, LayerData["textAlignHorizontal"]> = {
@@ -641,10 +710,10 @@ function makeTextLayer(
         start: "LEFT",
         end: "RIGHT",
     }
-    const align = alignMap[cs.textAlign]
+    const align = alignMap[computedStyle.textAlign]
     if (align) layer.textAlignHorizontal = align
 
-    const color = parseColor(cs.color)
+    const color = parseColor(computedStyle.color)
     if (color) {
         layer.fills = [
             {
@@ -655,25 +724,27 @@ function makeTextLayer(
         ]
     }
 
-    const lh = parseFloat(cs.lineHeight)
-    if (lh && cs.lineHeight !== "normal") {
+    const lh = parseFloat(computedStyle.lineHeight)
+    if (lh && computedStyle.lineHeight !== "normal") {
         layer.lineHeight = { value: lh, unit: "PIXELS" }
     }
 
-    const ls = parseFloat(cs.letterSpacing)
-    if (ls && cs.letterSpacing !== "normal") {
+    const ls = parseFloat(computedStyle.letterSpacing)
+    if (ls && computedStyle.letterSpacing !== "normal") {
         layer.letterSpacing = { value: ls, unit: "PIXELS" }
     }
 
-    if (cs.textDecorationLine.includes("underline")) {
+    if (computedStyle.textDecorationLine.includes("underline")) {
         layer.textDecoration = "UNDERLINE"
-    } else if (cs.textDecorationLine.includes("line-through")) {
+    } else if (computedStyle.textDecorationLine.includes("line-through")) {
         layer.textDecoration = "STRIKETHROUGH"
     }
 
-    if (cs.textTransform === "uppercase") layer.textCase = "UPPER"
-    else if (cs.textTransform === "lowercase") layer.textCase = "LOWER"
-    else if (cs.textTransform === "capitalize") layer.textCase = "TITLE"
+    if (computedStyle.textTransform === "uppercase") layer.textCase = "UPPER"
+    else if (computedStyle.textTransform === "lowercase")
+        layer.textCase = "LOWER"
+    else if (computedStyle.textTransform === "capitalize")
+        layer.textCase = "TITLE"
 
     return layer
 }
@@ -713,7 +784,7 @@ function elementName(el: Element): string {
     const cls = el.className
     if (id) return `${tag}#${id}`
     if (typeof cls === "string" && cls) {
-        return `${tag}.${cls.split(/\s+/)[0]}`
+        return `${tag}.${cls.split(" ")[0]}`
     }
     return tag
 }
