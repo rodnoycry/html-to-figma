@@ -52,25 +52,17 @@ function convertElement(
     const autoLayout = extractAutoLayout(cs, authoredStyle)
     const hasBoxVisuals = hasFrameVisuals(cs)
 
+    const childSizing = computeChildSizing(
+        el,
+        cs,
+        authoredStyle,
+        parentIsAutoLayout,
+        parentLayoutMode,
+    )
+
     if (shouldConvertElementToText(el, cs, hasBoxVisuals, autoLayout)) {
         const textLayer = makeTextLayerFromElement(el, rect, parentRect)
-        if (parentIsAutoLayout && !isOutOfFlow(cs)) {
-            const grow = parseFloat(cs.flexGrow) || 0
-            if (grow > 0) {
-                textLayer.layoutGrow = grow
-                if (parentLayoutMode === "HORIZONTAL") {
-                    textLayer.layoutSizingHorizontal = "FILL"
-                } else {
-                    textLayer.layoutSizingVertical = "FILL"
-                }
-            }
-            if (
-                parentLayoutMode === "VERTICAL" &&
-                shouldStretchCrossAxis(el, cs)
-            ) {
-                textLayer.layoutSizingHorizontal = "FILL"
-            }
-        }
+        Object.assign(textLayer, childSizing)
         return textLayer
     }
 
@@ -106,27 +98,11 @@ function convertElement(
     }
 
     if (autoLayout) Object.assign(layer, autoLayout)
+    Object.assign(layer, childSizing)
 
     const thisIsAutoLayout = !!autoLayout && autoLayout.layoutMode !== "GRID"
     const thisLayoutMode =
         autoLayout?.layoutMode === "VERTICAL" ? "VERTICAL" : "HORIZONTAL"
-
-    if (parentIsAutoLayout && isOutOfFlow(cs)) {
-        layer.layoutPositioning = "ABSOLUTE"
-        layer.constraints = extractConstraints(cs)
-    }
-
-    if (parentIsAutoLayout) {
-        const grow = parseFloat(cs.flexGrow) || 0
-        if (grow > 0) {
-            layer.layoutGrow = grow
-            if (parentLayoutMode === "HORIZONTAL") {
-                layer.layoutSizingHorizontal = "FILL"
-            } else {
-                layer.layoutSizingVertical = "FILL"
-            }
-        }
-    }
 
     if (el instanceof w.HTMLImageElement || el.tagName === "IMG") {
         const img = el as HTMLImageElement
@@ -269,10 +245,51 @@ function makeMarginSpacer(
     }
 }
 
-function shouldStretchCrossAxis(
+function computeChildSizing(
     el: Element,
     cs: CSSStyleDeclaration,
-): boolean {
+    authoredStyle: (property: string) => string,
+    parentIsAutoLayout: boolean,
+    parentLayoutMode: "HORIZONTAL" | "VERTICAL",
+): Partial<LayerData> {
+    if (!parentIsAutoLayout) return {}
+
+    if (isOutOfFlow(cs)) {
+        return {
+            layoutPositioning: "ABSOLUTE" as const,
+            constraints: extractConstraints(cs),
+        }
+    }
+
+    const result: Partial<LayerData> = {}
+
+    const grow = parseFloat(cs.flexGrow) || 0
+    if (grow > 0) {
+        result.layoutGrow = grow
+        if (parentLayoutMode === "HORIZONTAL") {
+            result.layoutSizingHorizontal = "FILL"
+        } else {
+            result.layoutSizingVertical = "FILL"
+        }
+    }
+
+    const crossProp = parentLayoutMode === "VERTICAL" ? "width" : "height"
+    const authoredCross = authoredStyle(crossProp).trim()
+    if (
+        (!authoredCross || authoredCross === "auto") &&
+        resolvesToStretch(el, cs)
+    ) {
+        if (parentLayoutMode === "VERTICAL") {
+            result.layoutSizingHorizontal = "FILL"
+        } else {
+            result.layoutSizingVertical = "FILL"
+        }
+    }
+
+    return result
+}
+
+function resolvesToStretch(el: Element, cs: CSSStyleDeclaration): boolean {
     const selfAlign = cs.alignSelf
     if (
         selfAlign !== "auto" &&
