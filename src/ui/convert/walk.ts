@@ -10,7 +10,12 @@ import {
 
 export function walkDOM(root: HTMLElement): LayerData {
     const rootRect = root.getBoundingClientRect()
-    const layer = convertElement(root, rootRect, false, "HORIZONTAL")
+    const layer = convertElement({
+        element: root,
+        parentRect: rootRect,
+        parentIsAutoLayout: false,
+        parentLayoutMode: "HORIZONTAL",
+    })
     if (layer) {
         layer.x = 0
         layer.y = 0
@@ -27,41 +32,53 @@ export function walkDOM(root: HTMLElement): LayerData {
     }
 }
 
-function win(el: Node): Window & typeof globalThis {
+function getElementWindow(el: Node): Window & typeof globalThis {
     return el.ownerDocument!.defaultView!
 }
 
-function convertElement(
-    el: Element,
-    parentRect: DOMRect,
-    parentIsAutoLayout: boolean,
-    parentLayoutMode: "HORIZONTAL" | "VERTICAL",
-): LayerData | null {
-    const w = win(el)
-    const cs = w.getComputedStyle(el)
-    if (cs.display === "none") return null
+function convertElement({
+    element,
+    parentRect,
+    parentIsAutoLayout,
+    parentLayoutMode,
+}: {
+    element: Element
+    parentRect: DOMRect
+    parentIsAutoLayout: boolean
+    parentLayoutMode: "HORIZONTAL" | "VERTICAL"
+}): LayerData | null {
+    const elementWindow = getElementWindow(element)
+    const computedStyle = elementWindow.getComputedStyle(element)
+    if (computedStyle.display === "none") return null
 
-    const rect = el.getBoundingClientRect()
+    const rect = element.getBoundingClientRect()
     if (rect.width < 0.5 || rect.height < 0.5) return null
 
-    if (el instanceof w.SVGSVGElement) {
-        return convertSvg(el as SVGSVGElement, parentRect)
+    if (element instanceof elementWindow.SVGSVGElement) {
+        return convertSvg(element as SVGSVGElement, parentRect)
     }
 
-    const authoredStyle = createAuthoredStyleGetter(el)
-    const autoLayout = extractAutoLayout(cs, authoredStyle)
-    const hasBoxVisuals = hasFrameVisuals(cs)
+    const authoredStyle = createAuthoredStyleGetter(element)
+    const autoLayout = extractAutoLayout(computedStyle, authoredStyle)
+    const hasBoxVisuals = hasFrameVisuals(computedStyle)
 
     const childSizing = computeChildSizing(
-        el,
-        cs,
+        element,
+        computedStyle,
         authoredStyle,
         parentIsAutoLayout,
         parentLayoutMode,
     )
 
-    if (shouldConvertElementToText(el, cs, hasBoxVisuals, autoLayout)) {
-        const textLayer = makeTextLayerFromElement(el, rect, parentRect)
+    if (
+        shouldConvertElementToText(
+            element,
+            computedStyle,
+            hasBoxVisuals,
+            autoLayout,
+        )
+    ) {
+        const textLayer = makeTextLayerFromElement(element, rect, parentRect)
         Object.assign(textLayer, childSizing)
         return textLayer
     }
@@ -72,28 +89,31 @@ function convertElement(
         y: Math.round(rect.top - parentRect.top),
         width: Math.round(rect.width),
         height: Math.round(rect.height),
-        name: elementName(el),
+        name: elementName(element),
     }
 
-    const fills = extractFills(cs)
+    const fills = extractFills(computedStyle)
     if (fills) layer.fills = fills
 
-    const strokeInfo = extractStrokes(cs)
+    const strokeInfo = extractStrokes(computedStyle)
     if (strokeInfo) {
         layer.strokes = strokeInfo.strokes
         layer.strokeWeight = strokeInfo.strokeWeight
     }
 
-    const radii = extractCornerRadii(cs)
+    const radii = extractCornerRadii(computedStyle)
     if (radii) Object.assign(layer, radii)
 
-    const effects = extractEffects(cs)
+    const effects = extractEffects(computedStyle)
     if (effects) layer.effects = effects
 
-    const opacity = parseFloat(cs.opacity)
+    const opacity = parseFloat(computedStyle.opacity)
     if (opacity < 1) layer.opacity = opacity
 
-    if (cs.overflow === "hidden" || cs.overflow === "clip") {
+    if (
+        computedStyle.overflow === "hidden" ||
+        computedStyle.overflow === "clip"
+    ) {
         layer.clipsContent = true
     }
 
@@ -104,8 +124,11 @@ function convertElement(
     const thisLayoutMode =
         autoLayout?.layoutMode === "VERTICAL" ? "VERTICAL" : "HORIZONTAL"
 
-    if (el instanceof w.HTMLImageElement || el.tagName === "IMG") {
-        const img = el as HTMLImageElement
+    if (
+        element instanceof elementWindow.HTMLImageElement ||
+        element.tagName === "IMG"
+    ) {
+        const img = element as HTMLImageElement
         layer.name = img.alt || "image"
         if (!layer.fills?.length) {
             layer.fills = [
@@ -120,13 +143,13 @@ function convertElement(
     }
 
     if (
-        el instanceof w.HTMLInputElement ||
-        el instanceof w.HTMLTextAreaElement
+        element instanceof elementWindow.HTMLInputElement ||
+        element instanceof elementWindow.HTMLTextAreaElement
     ) {
-        const input = el as HTMLInputElement | HTMLTextAreaElement
+        const input = element as HTMLInputElement | HTMLTextAreaElement
         const text = input.value || input.placeholder
         if (text) {
-            layer.children = [makeTextLayer(text, cs, rect, rect)]
+            layer.children = [makeTextLayer(text, computedStyle, rect, rect)]
         }
         return layer
     }
@@ -134,33 +157,37 @@ function convertElement(
     const children: LayerData[] = []
     if (
         !autoLayout &&
-        isTextFlowElement(el, cs) &&
-        hasOnlyInlineTextContent(el) &&
-        textContent(el)
+        isTextFlowElement(element, computedStyle) &&
+        hasOnlyInlineTextContent(element) &&
+        textContent(element)
     ) {
-        children.push(makeTextLayerFromElement(el, rect, rect))
+        children.push(makeTextLayerFromElement(element, rect, rect))
     } else {
-        for (const child of el.childNodes) {
+        for (const child of element.childNodes) {
             if (child.nodeType === Node.ELEMENT_NODE) {
-                const childLayer = convertElement(
-                    child as Element,
-                    rect,
-                    thisIsAutoLayout,
-                    thisLayoutMode,
-                )
+                const childLayer = convertElement({
+                    element: child as Element,
+                    parentRect: rect,
+                    parentIsAutoLayout: thisIsAutoLayout,
+                    parentLayoutMode: thisLayoutMode,
+                })
                 if (childLayer) {
-                    appendElementWithMarginSpacers(
+                    appendElementWithMarginSpacers({
                         children,
-                        child as Element,
+                        element: child as Element,
                         childLayer,
-                        thisIsAutoLayout,
-                        thisLayoutMode,
-                    )
+                        parentIsAutoLayout: thisIsAutoLayout,
+                        parentLayoutMode: thisLayoutMode,
+                    })
                 }
             } else if (child.nodeType === Node.TEXT_NODE) {
                 const text = child.textContent?.trim()
                 if (text) {
-                    const textLayer = convertTextNode(child as Text, el, rect)
+                    const textLayer = convertTextNode({
+                        textNode: child as Text,
+                        parentElement: element,
+                        parentRect: rect,
+                    })
                     if (textLayer) children.push(textLayer)
                 }
             }
@@ -181,19 +208,25 @@ function convertElement(
     return layer
 }
 
-function appendElementWithMarginSpacers(
-    children: LayerData[],
-    el: Element,
-    childLayer: LayerData,
-    parentIsAutoLayout: boolean,
-    parentLayoutMode: "HORIZONTAL" | "VERTICAL",
-): void {
+function appendElementWithMarginSpacers({
+    children,
+    element,
+    childLayer,
+    parentIsAutoLayout,
+    parentLayoutMode,
+}: {
+    children: LayerData[]
+    element: Element
+    childLayer: LayerData
+    parentIsAutoLayout: boolean
+    parentLayoutMode: "HORIZONTAL" | "VERTICAL"
+}): void {
     if (!parentIsAutoLayout || childLayer.layoutPositioning === "ABSOLUTE") {
         children.push(childLayer)
         return
     }
 
-    const cs = win(el).getComputedStyle(el)
+    const cs = getElementWindow(element).getComputedStyle(element)
     const before =
         parentLayoutMode === "VERTICAL"
             ? parseMargin(cs.marginTop)
@@ -204,11 +237,15 @@ function appendElementWithMarginSpacers(
             : parseMargin(cs.marginRight)
 
     if (before > 0) {
-        children.push(makeMarginSpacer(before, parentLayoutMode, "before", el))
+        children.push(
+            makeMarginSpacer(before, parentLayoutMode, "before", element),
+        )
     }
     children.push(childLayer)
     if (after > 0) {
-        children.push(makeMarginSpacer(after, parentLayoutMode, "after", el))
+        children.push(
+            makeMarginSpacer(after, parentLayoutMode, "after", element),
+        )
     }
 }
 
@@ -302,7 +339,7 @@ function resolvesToStretch(el: Element, cs: CSSStyleDeclaration): boolean {
 
     const parentEl = el.parentElement
     if (!parentEl) return false
-    const parentCs = win(parentEl).getComputedStyle(parentEl)
+    const parentCs = getElementWindow(parentEl).getComputedStyle(parentEl)
     const parentAlign = parentCs.alignItems
     return parentAlign === "normal" || parentAlign === "stretch"
 }
@@ -400,7 +437,7 @@ function isInlineTextElement(el: Element, cs: CSSStyleDeclaration): boolean {
 
 function hasOnlyInlineTextContent(el: Element): boolean {
     for (const child of el.children) {
-        const cs = win(child).getComputedStyle(child)
+        const cs = getElementWindow(child).getComputedStyle(child)
         if (!isInlineTextElement(child, cs)) return false
         if (!hasOnlyInlineTextContent(child)) return false
     }
@@ -421,7 +458,7 @@ function makeTextLayerFromElement(
     parentRect: DOMRect,
 ): LayerData {
     const text = textContent(el)
-    const cs = win(el).getComputedStyle(el)
+    const cs = getElementWindow(el).getComputedStyle(el)
     const layer = makeTextLayer(text, cs, rect, parentRect)
     layer.textSegments = collectTextSegments(el, text)
     return layer
@@ -447,7 +484,7 @@ function collectTextSegments(
             if (end > start) {
                 segments.push({
                     ...extractTextStyle(
-                        win(inheritedElement).getComputedStyle(
+                        getElementWindow(inheritedElement).getComputedStyle(
                             inheritedElement,
                         ),
                     ),
@@ -531,7 +568,7 @@ function createAuthoredStyleGetter(el: Element): (property: string) => string {
 
 function collectStyleRules(doc: Document): CSSStyleRule[] {
     const result: CSSStyleRule[] = []
-    const w = win(doc.documentElement)
+    const w = getElementWindow(doc.documentElement)
     const visit = (rules: CSSRuleList) => {
         for (const rule of Array.from(rules)) {
             if (rule instanceof w.CSSStyleRule) {
@@ -554,11 +591,15 @@ function collectStyleRules(doc: Document): CSSStyleRule[] {
     return result
 }
 
-function convertTextNode(
-    textNode: Text,
-    parentEl: Element,
-    parentRect: DOMRect,
-): LayerData | null {
+function convertTextNode({
+    textNode,
+    parentElement,
+    parentRect,
+}: {
+    textNode: Text
+    parentElement: Element
+    parentRect: DOMRect
+}): LayerData | null {
     const text = textNode.textContent?.trim()
     if (!text) return null
 
@@ -569,7 +610,7 @@ function convertTextNode(
 
     if (rect.width < 0.5 || rect.height < 0.5) return null
 
-    const cs = win(parentEl).getComputedStyle(parentEl)
+    const cs = getElementWindow(parentElement).getComputedStyle(parentElement)
     return makeTextLayer(text, cs, rect, parentRect)
 }
 

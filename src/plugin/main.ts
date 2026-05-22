@@ -19,7 +19,10 @@ figma.ui.onmessage = handleMessages<UIToPluginMessage>({
                 existing.remove()
             }
 
-            const node = await buildTree(msg.layers, figma.currentPage)
+            const node = await buildTree({
+                layer: msg.layers,
+                parent: figma.currentPage,
+            })
             if (node) {
                 figma.currentPage.selection = [node]
                 figma.viewport.scrollAndZoomIntoView([node])

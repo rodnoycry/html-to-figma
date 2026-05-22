@@ -1,11 +1,15 @@
 import type { LayerData } from "../shared/types.ts"
+import { Fallback } from "../shared/fallbacks.ts"
 
-export async function buildTree(
-    layer: LayerData,
-    parent: PageNode | FrameNode,
-): Promise<SceneNode | null> {
+export async function buildTree({
+    layer,
+    parent,
+}: {
+    layer: LayerData
+    parent: PageNode | FrameNode
+}): Promise<SceneNode | null> {
     if (layer.type === "TEXT") {
-        return createTextNode(layer, parent)
+        return createTextNode({ layer, parent })
     }
 
     if (layer.type === "SVG" && layer.svg) {
@@ -25,14 +29,14 @@ export async function buildTree(
     }
 
     const frame = figma.createFrame()
-    frame.name = layer.name ?? "frame"
+    frame.name = layer.name ?? Fallback.LAYER_NAME
 
     applyVisuals(frame, layer)
 
     if (layer.layoutMode) {
         frame.layoutMode = layer.layoutMode
         if (layer.layoutMode === "GRID") {
-            applyGridLayout(frame, layer)
+            applyGridLayout({ frame, layer })
         } else {
             frame.primaryAxisAlignItems = layer.primaryAxisAlignItems ?? "MIN"
             frame.counterAxisAlignItems = layer.counterAxisAlignItems ?? "MIN"
@@ -60,7 +64,7 @@ export async function buildTree(
 
     if (layer.children) {
         for (const child of layer.children) {
-            await buildTree(child, frame)
+            await buildTree({ layer: child, parent: frame })
         }
     }
 
@@ -90,9 +94,21 @@ export async function buildTree(
     return frame
 }
 
-function applyGridLayout(frame: FrameNode, layer: LayerData): void {
-    frame.gridColumnCount = Math.max(layer.gridColumnCount ?? 1, 1)
-    frame.gridRowCount = Math.max(layer.gridRowCount ?? 1, 1)
+function applyGridLayout({
+    frame,
+    layer,
+}: {
+    frame: FrameNode
+    layer: LayerData
+}): void {
+    frame.gridColumnCount = Math.max(
+        layer.gridColumnCount ?? Fallback.GRID_COLUMN_COUNT,
+        1,
+    )
+    frame.gridRowCount = Math.max(
+        layer.gridRowCount ?? Fallback.GRID_ROW_COUNT,
+        1,
+    )
 
     if (layer.gridColumnGap !== undefined) {
         frame.gridColumnGap = layer.gridColumnGap
@@ -193,10 +209,13 @@ function applyVisuals(frame: FrameNode, layer: LayerData): void {
     if (layer.clipsContent) frame.clipsContent = true
 }
 
-async function createTextNode(
-    layer: LayerData,
-    parent: PageNode | FrameNode,
-): Promise<TextNode> {
+async function createTextNode({
+    layer,
+    parent,
+}: {
+    layer: LayerData
+    parent: PageNode | FrameNode
+}): Promise<TextNode> {
     const node = figma.createText()
     const fontName = await loadFont(
         layer.fontFamily ?? "Inter",
