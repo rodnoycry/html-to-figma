@@ -138,7 +138,11 @@ function convertElement(
     }
 
     const children: LayerData[] = []
-    if (hasOnlyInlineTextContent(el) && textContent(el)) {
+    if (
+        isTextContainerElement(el, cs) &&
+        hasOnlyInlineTextContent(el) &&
+        textContent(el)
+    ) {
         children.push(makeTextLayerFromElement(el, rect, rect))
     } else {
         for (const child of el.childNodes) {
@@ -207,8 +211,39 @@ function shouldConvertElementToText(
     autoLayout: Partial<LayerData> | undefined,
 ): boolean {
     if (hasBoxVisuals || autoLayout) return false
-    if (!isInlineTextElement(el, cs)) return false
+    if (!isTextContainerElement(el, cs)) return false
     return hasOnlyInlineTextContent(el) && !!textContent(el)
+}
+
+function isTextContainerElement(el: Element, cs: CSSStyleDeclaration): boolean {
+    const tag = el.tagName.toLowerCase()
+    if (
+        [
+            "a",
+            "p",
+            "span",
+            "em",
+            "strong",
+            "b",
+            "i",
+            "small",
+            "label",
+            "button",
+            "li",
+            "figcaption",
+            "blockquote",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+        ].includes(tag)
+    ) {
+        return true
+    }
+
+    return cs.display === "inline" || cs.display === "inline-block"
 }
 
 function isInlineTextElement(el: Element, cs: CSSStyleDeclaration): boolean {
@@ -300,6 +335,7 @@ function extractTextStyle(
         fontSize: Math.round(parseFloat(cs.fontSize)) || 16,
         fontFamily: extractFontFamily(cs.fontFamily),
         fontWeight: parseFontWeight(cs.fontWeight),
+        fontStyle: cs.fontStyle === "italic" ? "ITALIC" : "NORMAL",
     }
 
     const color = parseColor(cs.color)
@@ -409,6 +445,7 @@ function makeTextLayer(
         fontSize: Math.round(parseFloat(cs.fontSize)) || 16,
         fontFamily: extractFontFamily(cs.fontFamily),
         fontWeight: parseFontWeight(cs.fontWeight),
+        fontStyle: cs.fontStyle === "italic" ? "ITALIC" : "NORMAL",
     }
 
     const alignMap: Record<string, LayerData["textAlignHorizontal"]> = {

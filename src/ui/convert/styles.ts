@@ -203,6 +203,8 @@ function extractGridLayout(
     cs: CSSStyleDeclaration,
     authoredStyle?: (property: string) => string,
 ): Partial<LayerData> | undefined {
+    if (!isSafeFigmaGrid(cs)) return undefined
+
     const columnTracks = parseGridTracks(
         authoredStyle?.("grid-template-columns") || cs.gridTemplateColumns,
     )
@@ -225,6 +227,18 @@ function extractGridLayout(
         ...extractAutoSizing(cs, authoredStyle),
         ...extractPadding(cs),
     }
+}
+
+function isSafeFigmaGrid(cs: CSSStyleDeclaration): boolean {
+    if (cs.alignItems === "stretch" || cs.justifyItems === "stretch") {
+        return false
+    }
+
+    if (parseFloat(cs.minHeight) > 0 || parseFloat(cs.minWidth) > 0) {
+        return false
+    }
+
+    return true
 }
 
 function extractAutoSizing(

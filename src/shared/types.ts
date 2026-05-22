@@ -23,6 +23,7 @@ export interface LayerData {
     fontSize?: number
     fontFamily?: string
     fontWeight?: number
+    fontStyle?: "NORMAL" | "ITALIC"
     textAlignHorizontal?: "LEFT" | "CENTER" | "RIGHT" | "JUSTIFIED"
     lineHeight?: LineHeight
     letterSpacing?: LetterSpacing
@@ -63,6 +64,7 @@ export interface TextSegment {
     fontSize?: number
     fontFamily?: string
     fontWeight?: number
+    fontStyle?: "NORMAL" | "ITALIC"
     fills?: Paint[]
     letterSpacing?: LetterSpacing
     textDecoration?: "NONE" | "UNDERLINE" | "STRIKETHROUGH"

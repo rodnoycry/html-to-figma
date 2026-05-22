@@ -201,6 +201,7 @@ async function createTextNode(
     const fontName = await loadFont(
         layer.fontFamily ?? "Inter",
         layer.fontWeight ?? 400,
+        layer.fontStyle ?? "NORMAL",
     )
     node.fontName = fontName
     node.characters = layer.characters ?? ""
@@ -279,6 +280,7 @@ async function applyTextSegments(
         const fontName = await loadFont(
             segment.fontFamily ?? layer.fontFamily ?? "Inter",
             segment.fontWeight ?? layer.fontWeight ?? 400,
+            segment.fontStyle ?? layer.fontStyle ?? "NORMAL",
         )
         node.setRangeFontName(segment.start, segment.end, fontName)
         if (segment.fontSize !== undefined) {
@@ -318,17 +320,24 @@ async function applyTextSegments(
 
 const fontCache = new Map<string, FontName>()
 
-async function loadFont(family: string, weight: number): Promise<FontName> {
-    const key = `${family}:${weight}`
+async function loadFont(
+    family: string,
+    weight: number,
+    fontStyle: "NORMAL" | "ITALIC" = "NORMAL",
+): Promise<FontName> {
+    const key = `${family}:${weight}:${fontStyle}`
     const cached = fontCache.get(key)
     if (cached) return cached
 
-    const style = weightToStyle(weight)
+    const style = weightToStyle(weight, fontStyle)
+    const regularStyle = fontStyle === "ITALIC" ? "Italic" : "Regular"
 
     const attempts: FontName[] = [
         { family, style },
-        { family, style: "Regular" },
+        { family, style: regularStyle },
         { family: "Inter", style },
+        { family: "Inter", style: regularStyle },
+        { family, style: "Regular" },
         { family: "Inter", style: "Regular" },
     ]
 
@@ -351,14 +360,15 @@ async function loadFont(family: string, weight: number): Promise<FontName> {
     return fallback
 }
 
-function weightToStyle(w: number): string {
-    if (w <= 100) return "Thin"
-    if (w <= 200) return "Extra Light"
-    if (w <= 300) return "Light"
-    if (w <= 400) return "Regular"
-    if (w <= 500) return "Medium"
-    if (w <= 600) return "Semi Bold"
-    if (w <= 700) return "Bold"
-    if (w <= 800) return "Extra Bold"
-    return "Black"
+function weightToStyle(w: number, fontStyle: "NORMAL" | "ITALIC"): string {
+    const italic = fontStyle === "ITALIC"
+    if (w <= 100) return italic ? "Thin Italic" : "Thin"
+    if (w <= 200) return italic ? "Extra Light Italic" : "Extra Light"
+    if (w <= 300) return italic ? "Light Italic" : "Light"
+    if (w <= 400) return italic ? "Italic" : "Regular"
+    if (w <= 500) return italic ? "Medium Italic" : "Medium"
+    if (w <= 600) return italic ? "Semi Bold Italic" : "Semi Bold"
+    if (w <= 700) return italic ? "Bold Italic" : "Bold"
+    if (w <= 800) return italic ? "Extra Bold Italic" : "Extra Bold"
+    return italic ? "Black Italic" : "Black"
 }
