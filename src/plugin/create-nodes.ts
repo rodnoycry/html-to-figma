@@ -244,8 +244,7 @@ async function createTextNode(
 
     await applyTextSegments(node, layer)
 
-    node.textAutoResize = "HEIGHT"
-    node.resize(Math.max(layer.width, 1), Math.max(layer.height, 1))
+    node.textAutoResize = "WIDTH_AND_HEIGHT"
 
     parent.appendChild(node)
     node.x = layer.x

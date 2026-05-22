@@ -89,7 +89,7 @@ function convertElement(
 
     if (autoLayout) Object.assign(layer, autoLayout)
 
-    const thisIsAutoLayout = !!autoLayout
+    const thisIsAutoLayout = !!autoLayout && autoLayout.layoutMode !== "GRID"
     const thisLayoutMode =
         autoLayout?.layoutMode === "VERTICAL" ? "VERTICAL" : "HORIZONTAL"
 
@@ -139,7 +139,8 @@ function convertElement(
 
     const children: LayerData[] = []
     if (
-        isTextContainerElement(el, cs) &&
+        !autoLayout &&
+        isTextFlowElement(el, cs) &&
         hasOnlyInlineTextContent(el) &&
         textContent(el)
     ) {
@@ -153,7 +154,15 @@ function convertElement(
                     thisIsAutoLayout,
                     thisLayoutMode,
                 )
-                if (childLayer) children.push(childLayer)
+                if (childLayer) {
+                    appendElementWithMarginSpacers(
+                        children,
+                        child as Element,
+                        childLayer,
+                        thisIsAutoLayout,
+                        thisLayoutMode,
+                    )
+                }
             } else if (child.nodeType === Node.TEXT_NODE) {
                 const text = child.textContent?.trim()
                 if (text) {
@@ -176,6 +185,62 @@ function convertElement(
         })
     }
     return layer
+}
+
+function appendElementWithMarginSpacers(
+    children: LayerData[],
+    el: Element,
+    childLayer: LayerData,
+    parentIsAutoLayout: boolean,
+    parentLayoutMode: "HORIZONTAL" | "VERTICAL",
+): void {
+    if (!parentIsAutoLayout || childLayer.layoutPositioning === "ABSOLUTE") {
+        children.push(childLayer)
+        return
+    }
+
+    const cs = win(el).getComputedStyle(el)
+    const before =
+        parentLayoutMode === "VERTICAL"
+            ? parseMargin(cs.marginTop)
+            : parseMargin(cs.marginLeft)
+    const after =
+        parentLayoutMode === "VERTICAL"
+            ? parseMargin(cs.marginBottom)
+            : parseMargin(cs.marginRight)
+
+    if (before > 0) {
+        children.push(makeMarginSpacer(before, parentLayoutMode, "before", el))
+    }
+    children.push(childLayer)
+    if (after > 0) {
+        children.push(makeMarginSpacer(after, parentLayoutMode, "after", el))
+    }
+}
+
+function parseMargin(raw: string): number {
+    const value = Number.parseFloat(raw)
+    return Number.isFinite(value) && value > 0 ? Math.round(value) : 0
+}
+
+function makeMarginSpacer(
+    size: number,
+    parentLayoutMode: "HORIZONTAL" | "VERTICAL",
+    position: "before" | "after",
+    el: Element,
+): LayerData {
+    return {
+        type: "FRAME",
+        x: 0,
+        y: 0,
+        width: parentLayoutMode === "HORIZONTAL" ? size : 1,
+        height: parentLayoutMode === "VERTICAL" ? size : 1,
+        name: `margin-${position}.${elementName(el)}`,
+        layoutSizingHorizontal:
+            parentLayoutMode === "HORIZONTAL" ? "FIXED" : "FILL",
+        layoutSizingVertical:
+            parentLayoutMode === "VERTICAL" ? "FIXED" : "FILL",
+    }
 }
 
 function isOutOfFlow(cs: CSSStyleDeclaration): boolean {
@@ -211,11 +276,14 @@ function shouldConvertElementToText(
     autoLayout: Partial<LayerData> | undefined,
 ): boolean {
     if (hasBoxVisuals || autoLayout) return false
-    if (!isTextContainerElement(el, cs)) return false
+    if (!isTextFlowElement(el, cs)) return false
     return hasOnlyInlineTextContent(el) && !!textContent(el)
 }
 
-function isTextContainerElement(el: Element, cs: CSSStyleDeclaration): boolean {
+function isTextFlowElement(el: Element, cs: CSSStyleDeclaration): boolean {
+    if (isControlElement(el)) return false
+    if (isLayoutDisplay(cs)) return false
+
     const tag = el.tagName.toLowerCase()
     if (
         [
@@ -228,7 +296,6 @@ function isTextContainerElement(el: Element, cs: CSSStyleDeclaration): boolean {
             "i",
             "small",
             "label",
-            "button",
             "li",
             "figcaption",
             "blockquote",
@@ -244,6 +311,23 @@ function isTextContainerElement(el: Element, cs: CSSStyleDeclaration): boolean {
     }
 
     return cs.display === "inline" || cs.display === "inline-block"
+}
+
+function isControlElement(el: Element): boolean {
+    const tag = el.tagName.toLowerCase()
+    return (
+        ["button", "select", "textarea", "input", "option"].includes(tag) ||
+        el.getAttribute("role") === "button"
+    )
+}
+
+function isLayoutDisplay(cs: CSSStyleDeclaration): boolean {
+    return (
+        cs.display === "flex" ||
+        cs.display === "inline-flex" ||
+        cs.display === "grid" ||
+        cs.display === "inline-grid"
+    )
 }
 
 function isInlineTextElement(el: Element, cs: CSSStyleDeclaration): boolean {
