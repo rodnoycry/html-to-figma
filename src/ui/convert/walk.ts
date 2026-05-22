@@ -48,6 +48,14 @@ function convertElement(
         return convertSvg(el as SVGSVGElement, parentRect)
     }
 
+    const authoredStyle = createAuthoredStyleGetter(el)
+    const autoLayout = extractAutoLayout(cs, authoredStyle)
+    const hasBoxVisuals = hasFrameVisuals(cs)
+
+    if (shouldConvertElementToText(el, cs, hasBoxVisuals, autoLayout)) {
+        return makeTextLayerFromElement(el, rect, parentRect)
+    }
+
     const layer: LayerData = {
         type: "FRAME",
         x: Math.round(rect.left - parentRect.left),
@@ -79,11 +87,16 @@ function convertElement(
         layer.clipsContent = true
     }
 
-    const autoLayout = extractAutoLayout(cs)
     if (autoLayout) Object.assign(layer, autoLayout)
 
     const thisIsAutoLayout = !!autoLayout
-    const thisLayoutMode = autoLayout?.layoutMode ?? "HORIZONTAL"
+    const thisLayoutMode =
+        autoLayout?.layoutMode === "VERTICAL" ? "VERTICAL" : "HORIZONTAL"
+
+    if (parentIsAutoLayout && isOutOfFlow(cs)) {
+        layer.layoutPositioning = "ABSOLUTE"
+        layer.constraints = extractConstraints(cs)
+    }
 
     if (parentIsAutoLayout) {
         const grow = parseFloat(cs.flexGrow) || 0
@@ -125,26 +138,240 @@ function convertElement(
     }
 
     const children: LayerData[] = []
-    for (const child of el.childNodes) {
-        if (child.nodeType === Node.ELEMENT_NODE) {
-            const childLayer = convertElement(
-                child as Element,
-                rect,
-                thisIsAutoLayout,
-                thisLayoutMode,
-            )
-            if (childLayer) children.push(childLayer)
-        } else if (child.nodeType === Node.TEXT_NODE) {
-            const text = child.textContent?.trim()
-            if (text) {
-                const textLayer = convertTextNode(child as Text, el, rect)
-                if (textLayer) children.push(textLayer)
+    if (hasOnlyInlineTextContent(el) && textContent(el)) {
+        children.push(makeTextLayerFromElement(el, rect, rect))
+    } else {
+        for (const child of el.childNodes) {
+            if (child.nodeType === Node.ELEMENT_NODE) {
+                const childLayer = convertElement(
+                    child as Element,
+                    rect,
+                    thisIsAutoLayout,
+                    thisLayoutMode,
+                )
+                if (childLayer) children.push(childLayer)
+            } else if (child.nodeType === Node.TEXT_NODE) {
+                const text = child.textContent?.trim()
+                if (text) {
+                    const textLayer = convertTextNode(child as Text, el, rect)
+                    if (textLayer) children.push(textLayer)
+                }
             }
         }
     }
 
     if (children.length > 0) layer.children = children
+    if (layer.layoutMode === "GRID" && layer.gridColumnCount) {
+        const neededRows = Math.max(
+            Math.ceil(children.length / layer.gridColumnCount),
+            layer.gridRowCount ?? 1,
+        )
+        layer.gridRowCount = neededRows
+        layer.gridRowSizes = Array.from({ length: neededRows }, (_, index) => {
+            return layer.gridRowSizes?.[index] ?? { type: "HUG" }
+        })
+    }
     return layer
+}
+
+function isOutOfFlow(cs: CSSStyleDeclaration): boolean {
+    return cs.position === "absolute" || cs.position === "fixed"
+}
+
+function extractConstraints(cs: CSSStyleDeclaration): LayerData["constraints"] {
+    return {
+        horizontal: cs.right !== "auto" && cs.left === "auto" ? "MAX" : "MIN",
+        vertical: cs.bottom !== "auto" && cs.top === "auto" ? "MAX" : "MIN",
+    }
+}
+
+function hasFrameVisuals(cs: CSSStyleDeclaration): boolean {
+    return !!(
+        extractFills(cs) ||
+        extractStrokes(cs) ||
+        extractCornerRadii(cs) ||
+        extractEffects(cs) ||
+        parseFloat(cs.paddingTop) ||
+        parseFloat(cs.paddingRight) ||
+        parseFloat(cs.paddingBottom) ||
+        parseFloat(cs.paddingLeft) ||
+        cs.overflow === "hidden" ||
+        cs.overflow === "clip"
+    )
+}
+
+function shouldConvertElementToText(
+    el: Element,
+    cs: CSSStyleDeclaration,
+    hasBoxVisuals: boolean,
+    autoLayout: Partial<LayerData> | undefined,
+): boolean {
+    if (hasBoxVisuals || autoLayout) return false
+    if (!isInlineTextElement(el, cs)) return false
+    return hasOnlyInlineTextContent(el) && !!textContent(el)
+}
+
+function isInlineTextElement(el: Element, cs: CSSStyleDeclaration): boolean {
+    const tag = el.tagName.toLowerCase()
+    if (["a", "span", "em", "strong", "b", "i", "small"].includes(tag)) {
+        return true
+    }
+    return cs.display === "inline" || cs.display === "inline-block"
+}
+
+function hasOnlyInlineTextContent(el: Element): boolean {
+    for (const child of el.children) {
+        const cs = win(child).getComputedStyle(child)
+        if (!isInlineTextElement(child, cs)) return false
+        if (!hasOnlyInlineTextContent(child)) return false
+    }
+    return true
+}
+
+function textContent(el: Element): string {
+    return normalizeText(el.textContent ?? "")
+}
+
+function normalizeText(text: string): string {
+    return text.replace(/\s+/g, " ").trim()
+}
+
+function makeTextLayerFromElement(
+    el: Element,
+    rect: DOMRect,
+    parentRect: DOMRect,
+): LayerData {
+    const text = textContent(el)
+    const cs = win(el).getComputedStyle(el)
+    const layer = makeTextLayer(text, cs, rect, parentRect)
+    layer.textSegments = collectTextSegments(el, text)
+    return layer
+}
+
+function collectTextSegments(
+    el: Element,
+    expectedText: string,
+): LayerData["textSegments"] {
+    const segments: NonNullable<LayerData["textSegments"]> = []
+    let cursor = 0
+
+    const visit = (node: Node, inheritedElement: Element) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+            const raw = normalizeText(node.textContent ?? "")
+            if (!raw) return
+
+            if (cursor > 0 && expectedText[cursor] === " ") cursor++
+            const start = cursor
+            cursor += raw.length
+            const end = cursor
+
+            if (end > start) {
+                segments.push({
+                    ...extractTextStyle(
+                        win(inheritedElement).getComputedStyle(
+                            inheritedElement,
+                        ),
+                    ),
+                    start,
+                    end,
+                })
+            }
+            return
+        }
+
+        if (node.nodeType !== Node.ELEMENT_NODE) return
+        const childElement = node as Element
+        for (const child of childElement.childNodes) {
+            visit(child, childElement)
+        }
+    }
+
+    visit(el, el)
+    return segments.length > 1 ? segments : undefined
+}
+
+function extractTextStyle(
+    cs: CSSStyleDeclaration,
+): Omit<NonNullable<LayerData["textSegments"]>[number], "start" | "end"> {
+    const style: Omit<
+        NonNullable<LayerData["textSegments"]>[number],
+        "start" | "end"
+    > = {
+        fontSize: Math.round(parseFloat(cs.fontSize)) || 16,
+        fontFamily: extractFontFamily(cs.fontFamily),
+        fontWeight: parseFontWeight(cs.fontWeight),
+    }
+
+    const color = parseColor(cs.color)
+    if (color) {
+        style.fills = [
+            {
+                type: "SOLID",
+                color: { r: color.r, g: color.g, b: color.b },
+                opacity: color.a,
+            },
+        ]
+    }
+
+    const ls = parseFloat(cs.letterSpacing)
+    if (ls && cs.letterSpacing !== "normal") {
+        style.letterSpacing = { value: ls, unit: "PIXELS" }
+    }
+
+    if (cs.textDecorationLine.includes("underline")) {
+        style.textDecoration = "UNDERLINE"
+    } else if (cs.textDecorationLine.includes("line-through")) {
+        style.textDecoration = "STRIKETHROUGH"
+    }
+
+    if (cs.textTransform === "uppercase") style.textCase = "UPPER"
+    else if (cs.textTransform === "lowercase") style.textCase = "LOWER"
+    else if (cs.textTransform === "capitalize") style.textCase = "TITLE"
+
+    return style
+}
+
+function createAuthoredStyleGetter(el: Element): (property: string) => string {
+    const doc = el.ownerDocument
+    const rules = collectStyleRules(doc)
+    return (property: string) => {
+        let value = ""
+        for (const rule of rules) {
+            try {
+                if (el.matches(rule.selectorText)) {
+                    value = rule.style.getPropertyValue(property) || value
+                }
+            } catch {
+                // Ignore selectors unsupported by matches().
+            }
+        }
+        return value
+    }
+}
+
+function collectStyleRules(doc: Document): CSSStyleRule[] {
+    const result: CSSStyleRule[] = []
+    const w = win(doc.documentElement)
+    const visit = (rules: CSSRuleList) => {
+        for (const rule of Array.from(rules)) {
+            if (rule instanceof w.CSSStyleRule) {
+                result.push(rule)
+            } else if (rule instanceof w.CSSMediaRule) {
+                if (w.matchMedia(rule.conditionText).matches) {
+                    visit(rule.cssRules)
+                }
+            }
+        }
+    }
+
+    for (const sheet of Array.from(doc.styleSheets)) {
+        try {
+            visit(sheet.cssRules)
+        } catch {
+            // Cross-origin stylesheets are not expected in srcdoc, but skip safely.
+        }
+    }
+    return result
 }
 
 function convertTextNode(

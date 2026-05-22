@@ -31,12 +31,16 @@ export async function buildTree(
 
     if (layer.layoutMode) {
         frame.layoutMode = layer.layoutMode
-        frame.primaryAxisAlignItems = layer.primaryAxisAlignItems ?? "MIN"
-        frame.counterAxisAlignItems = layer.counterAxisAlignItems ?? "MIN"
-        if (layer.itemSpacing !== undefined)
-            frame.itemSpacing = layer.itemSpacing
-        if (layer.counterAxisSpacing !== undefined)
-            frame.counterAxisSpacing = layer.counterAxisSpacing
+        if (layer.layoutMode === "GRID") {
+            applyGridLayout(frame, layer)
+        } else {
+            frame.primaryAxisAlignItems = layer.primaryAxisAlignItems ?? "MIN"
+            frame.counterAxisAlignItems = layer.counterAxisAlignItems ?? "MIN"
+            if (layer.itemSpacing !== undefined)
+                frame.itemSpacing = layer.itemSpacing
+            if (layer.counterAxisSpacing !== undefined)
+                frame.counterAxisSpacing = layer.counterAxisSpacing
+        }
         if (layer.paddingTop !== undefined) frame.paddingTop = layer.paddingTop
         if (layer.paddingRight !== undefined)
             frame.paddingRight = layer.paddingRight
@@ -61,6 +65,15 @@ export async function buildTree(
     }
 
     try {
+        if (layer.layoutPositioning) {
+            frame.layoutPositioning = layer.layoutPositioning
+            frame.x = layer.x
+            frame.y = layer.y
+            frame.resize(Math.max(layer.width, 1), Math.max(layer.height, 1))
+        }
+        if (layer.constraints) {
+            frame.constraints = layer.constraints
+        }
         if (layer.layoutGrow !== undefined && layer.layoutGrow > 0) {
             frame.layoutGrow = 1
         }
@@ -75,6 +88,37 @@ export async function buildTree(
     }
 
     return frame
+}
+
+function applyGridLayout(frame: FrameNode, layer: LayerData): void {
+    frame.gridColumnCount = Math.max(layer.gridColumnCount ?? 1, 1)
+    frame.gridRowCount = Math.max(layer.gridRowCount ?? 1, 1)
+
+    if (layer.gridColumnGap !== undefined) {
+        frame.gridColumnGap = layer.gridColumnGap
+    }
+    if (layer.gridRowGap !== undefined) {
+        frame.gridRowGap = layer.gridRowGap
+    }
+
+    applyGridTrackSizes(frame.gridColumnSizes, layer.gridColumnSizes)
+    applyGridTrackSizes(frame.gridRowSizes, layer.gridRowSizes)
+}
+
+function applyGridTrackSizes(
+    figmaTracks: GridTrackSize[],
+    layerTracks: LayerData["gridColumnSizes"],
+): void {
+    if (!layerTracks) return
+
+    layerTracks.forEach((track, index) => {
+        const figmaTrack = figmaTracks[index]
+        if (!figmaTrack) return
+        figmaTrack.type = track.type
+        if (track.value !== undefined) {
+            figmaTrack.value = track.value
+        }
+    })
 }
 
 function applyVisuals(frame: FrameNode, layer: LayerData): void {
@@ -110,15 +154,39 @@ function applyVisuals(frame: FrameNode, layer: LayerData): void {
         frame.bottomRightRadius = layer.bottomRightRadius
 
     if (layer.effects) {
-        frame.effects = layer.effects.map((e) => ({
-            type: e.type,
-            color: e.color,
-            offset: e.offset,
-            radius: e.radius,
-            spread: e.spread ?? 0,
-            visible: e.visible,
-            blendMode: e.blendMode as BlendMode,
-        }))
+        const effects: Effect[] = layer.effects.map((e) => {
+            if (e.type === "BACKGROUND_BLUR") {
+                return {
+                    type: e.type,
+                    radius: e.radius,
+                    visible: e.visible,
+                    blurType: e.blurType ?? "NORMAL",
+                }
+            }
+
+            if (e.type === "DROP_SHADOW") {
+                return {
+                    type: e.type,
+                    color: e.color ?? { r: 0, g: 0, b: 0, a: 1 },
+                    offset: e.offset ?? { x: 0, y: 0 },
+                    radius: e.radius,
+                    spread: e.spread ?? 0,
+                    visible: e.visible,
+                    blendMode: (e.blendMode ?? "NORMAL") as BlendMode,
+                }
+            }
+
+            return {
+                type: e.type,
+                color: e.color ?? { r: 0, g: 0, b: 0, a: 1 },
+                offset: e.offset ?? { x: 0, y: 0 },
+                radius: e.radius,
+                spread: e.spread ?? 0,
+                visible: e.visible,
+                blendMode: (e.blendMode ?? "NORMAL") as BlendMode,
+            }
+        })
+        frame.effects = effects
     }
 
     if (layer.opacity !== undefined) frame.opacity = layer.opacity
@@ -173,6 +241,8 @@ async function createTextNode(
         node.textCase = layer.textCase
     }
 
+    await applyTextSegments(node, layer)
+
     node.textAutoResize = "HEIGHT"
     node.resize(Math.max(layer.width, 1), Math.max(layer.height, 1))
 
@@ -181,6 +251,14 @@ async function createTextNode(
     node.y = layer.y
 
     try {
+        if (layer.layoutPositioning) {
+            node.layoutPositioning = layer.layoutPositioning
+            node.x = layer.x
+            node.y = layer.y
+        }
+        if (layer.constraints) {
+            node.constraints = layer.constraints
+        }
         if (layer.layoutGrow !== undefined && layer.layoutGrow > 0) {
             node.layoutGrow = 1
         }
@@ -189,6 +267,53 @@ async function createTextNode(
     }
 
     return node
+}
+
+async function applyTextSegments(
+    node: TextNode,
+    layer: LayerData,
+): Promise<void> {
+    if (!layer.textSegments?.length) return
+
+    for (const segment of layer.textSegments) {
+        const fontName = await loadFont(
+            segment.fontFamily ?? layer.fontFamily ?? "Inter",
+            segment.fontWeight ?? layer.fontWeight ?? 400,
+        )
+        node.setRangeFontName(segment.start, segment.end, fontName)
+        if (segment.fontSize !== undefined) {
+            node.setRangeFontSize(segment.start, segment.end, segment.fontSize)
+        }
+        if (segment.fills) {
+            node.setRangeFills(
+                segment.start,
+                segment.end,
+                segment.fills.map((f) => ({
+                    type: "SOLID" as const,
+                    color: f.color ?? { r: 0, g: 0, b: 0 },
+                    opacity: f.opacity ?? 1,
+                    visible: true,
+                })),
+            )
+        }
+        if (segment.letterSpacing) {
+            node.setRangeLetterSpacing(
+                segment.start,
+                segment.end,
+                segment.letterSpacing,
+            )
+        }
+        if (segment.textDecoration && segment.textDecoration !== "NONE") {
+            node.setRangeTextDecoration(
+                segment.start,
+                segment.end,
+                segment.textDecoration,
+            )
+        }
+        if (segment.textCase && segment.textCase !== "ORIGINAL") {
+            node.setRangeTextCase(segment.start, segment.end, segment.textCase)
+        }
+    }
 }
 
 const fontCache = new Map<string, FontName>()

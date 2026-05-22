@@ -28,8 +28,9 @@ export interface LayerData {
     letterSpacing?: LetterSpacing
     textDecoration?: "NONE" | "UNDERLINE" | "STRIKETHROUGH"
     textCase?: "ORIGINAL" | "UPPER" | "LOWER" | "TITLE"
+    textSegments?: TextSegment[]
     // Auto-layout properties
-    layoutMode?: "HORIZONTAL" | "VERTICAL"
+    layoutMode?: "HORIZONTAL" | "VERTICAL" | "GRID"
     primaryAxisAlignItems?: "MIN" | "MAX" | "CENTER" | "SPACE_BETWEEN"
     counterAxisAlignItems?: "MIN" | "MAX" | "CENTER" | "BASELINE"
     itemSpacing?: number
@@ -42,11 +43,35 @@ export interface LayerData {
     layoutSizingVertical?: "FIXED" | "HUG" | "FILL"
     layoutWrap?: "WRAP" | "NO_WRAP"
     layoutGrow?: number
+    layoutPositioning?: "AUTO" | "ABSOLUTE"
+    gridRowCount?: number
+    gridColumnCount?: number
+    gridRowGap?: number
+    gridColumnGap?: number
+    gridRowSizes?: GridTrack[]
+    gridColumnSizes?: GridTrack[]
     // Image
     imageUrl?: string
     imageScaleMode?: "FILL" | "FIT" | "CROP" | "TILE"
     // SVG
     svg?: string
+}
+
+export interface TextSegment {
+    start: number
+    end: number
+    fontSize?: number
+    fontFamily?: string
+    fontWeight?: number
+    fills?: Paint[]
+    letterSpacing?: LetterSpacing
+    textDecoration?: "NONE" | "UNDERLINE" | "STRIKETHROUGH"
+    textCase?: "ORIGINAL" | "UPPER" | "LOWER" | "TITLE"
+}
+
+export interface GridTrack {
+    type: "FLEX" | "FIXED" | "HUG"
+    value?: number
 }
 
 interface Paint {
@@ -59,13 +84,14 @@ interface Paint {
 }
 
 interface Effect {
-    type: "DROP_SHADOW" | "INNER_SHADOW"
-    color: { r: number; g: number; b: number; a: number }
-    offset: { x: number; y: number }
+    type: "DROP_SHADOW" | "INNER_SHADOW" | "BACKGROUND_BLUR"
+    color?: { r: number; g: number; b: number; a: number }
+    offset?: { x: number; y: number }
     radius: number
     spread?: number
     visible: boolean
-    blendMode: string
+    blendMode?: string
+    blurType?: "NORMAL"
 }
 
 interface Constraints {

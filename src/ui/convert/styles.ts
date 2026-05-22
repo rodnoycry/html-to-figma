@@ -59,10 +59,22 @@ export function extractCornerRadii(cs: CSSStyleDeclaration):
 }
 
 export function extractEffects(cs: CSSStyleDeclaration): Effects | undefined {
-    const raw = cs.boxShadow
-    if (!raw || raw === "none") return undefined
-
     const effects: Effects = []
+    const blur = extractBackdropBlur(cs)
+    if (blur !== undefined) {
+        effects.push({
+            type: "BACKGROUND_BLUR",
+            radius: blur,
+            visible: true,
+            blurType: "NORMAL",
+        })
+    }
+
+    const raw = cs.boxShadow
+    if (!raw || raw === "none") {
+        return effects.length > 0 ? effects : undefined
+    }
+
     for (const part of splitOnTopLevelCommas(raw)) {
         const trimmed = part.trim()
         const isInset = trimmed.includes("inset")
@@ -91,6 +103,20 @@ export function extractEffects(cs: CSSStyleDeclaration): Effects | undefined {
     return effects.length > 0 ? effects : undefined
 }
 
+function extractBackdropBlur(cs: CSSStyleDeclaration): number | undefined {
+    const raw =
+        cs.backdropFilter ||
+        cs.getPropertyValue("backdrop-filter") ||
+        cs.getPropertyValue("-webkit-backdrop-filter")
+    if (!raw || raw === "none") return undefined
+
+    const match = raw.match(/blur\(([-\d.]+)px\)/)
+    if (!match) return undefined
+
+    const radius = Number(match[1])
+    return Number.isFinite(radius) && radius > 0 ? radius : undefined
+}
+
 function splitOnTopLevelCommas(s: string): string[] {
     const parts: string[] = []
     let depth = 0
@@ -111,7 +137,12 @@ function splitOnTopLevelCommas(s: string): string[] {
 
 export function extractAutoLayout(
     cs: CSSStyleDeclaration,
+    authoredStyle?: (property: string) => string,
 ): Partial<LayerData> | undefined {
+    if (cs.display === "grid" || cs.display === "inline-grid") {
+        return extractGridLayout(cs, authoredStyle)
+    }
+
     if (cs.display !== "flex" && cs.display !== "inline-flex") return undefined
 
     const dir = cs.flexDirection
@@ -140,6 +171,7 @@ export function extractAutoLayout(
         primaryAxisAlignItems: justify[cs.justifyContent] ?? "MIN",
         counterAxisAlignItems: align[cs.alignItems] ?? "MIN",
     }
+    Object.assign(result, extractAutoSizing(cs, authoredStyle))
 
     const rowGap = parseFloat(cs.rowGap) || 0
     const colGap = parseFloat(cs.columnGap) || 0
@@ -164,5 +196,101 @@ export function extractAutoLayout(
         result.layoutWrap = "WRAP"
     }
 
+    return result
+}
+
+function extractGridLayout(
+    cs: CSSStyleDeclaration,
+    authoredStyle?: (property: string) => string,
+): Partial<LayerData> | undefined {
+    const columnTracks = parseGridTracks(
+        authoredStyle?.("grid-template-columns") || cs.gridTemplateColumns,
+    )
+    if (columnTracks.length === 0) return undefined
+
+    const rowTracks = parseGridTracks(
+        authoredStyle?.("grid-template-rows") || cs.gridTemplateRows,
+    )
+    const rowGap = parseFloat(cs.rowGap) || 0
+    const columnGap = parseFloat(cs.columnGap) || 0
+
+    return {
+        layoutMode: "GRID",
+        gridColumnCount: columnTracks.length,
+        gridRowCount: Math.max(rowTracks.length, 1),
+        gridColumnSizes: columnTracks,
+        gridRowSizes: rowTracks.length > 0 ? rowTracks : [{ type: "HUG" }],
+        gridRowGap: rowGap,
+        gridColumnGap: columnGap,
+        ...extractAutoSizing(cs, authoredStyle),
+        ...extractPadding(cs),
+    }
+}
+
+function extractAutoSizing(
+    cs: CSSStyleDeclaration,
+    authoredStyle?: (property: string) => string,
+): Partial<LayerData> {
+    const result: Partial<LayerData> = {}
+    const authoredWidth = authoredStyle?.("width").trim()
+    const authoredHeight = authoredStyle?.("height").trim()
+
+    if (
+        (cs.display === "inline-flex" || cs.display === "inline-grid") &&
+        (!authoredWidth || authoredWidth === "auto")
+    ) {
+        result.layoutSizingHorizontal = "HUG"
+    }
+
+    if (!authoredHeight || authoredHeight === "auto") {
+        result.layoutSizingVertical = "HUG"
+    }
+
+    return result
+}
+
+function parseGridTracks(
+    raw: string,
+): NonNullable<LayerData["gridColumnSizes"]> {
+    if (!raw || raw === "none") return []
+
+    const expanded = raw.replace(
+        /repeat\((\d+),\s*([^)]+)\)/g,
+        (_match, count: string, value: string) =>
+            Array.from({ length: Number(count) }, () => value.trim()).join(" "),
+    )
+
+    return expanded
+        .trim()
+        .split(/\s+/)
+        .map((track) => {
+            if (track === "auto" || track.startsWith("min-content")) {
+                return { type: "HUG" as const }
+            }
+            if (track.endsWith("fr")) {
+                const value = Number.parseFloat(track)
+                return {
+                    type: "FLEX" as const,
+                    value: Number.isFinite(value) ? value : undefined,
+                }
+            }
+            const fixed = Number.parseFloat(track)
+            if (Number.isFinite(fixed) && track.endsWith("px")) {
+                return { type: "FIXED" as const, value: fixed }
+            }
+            return { type: "HUG" as const }
+        })
+}
+
+function extractPadding(cs: CSSStyleDeclaration): Partial<LayerData> {
+    const result: Partial<LayerData> = {}
+    const pt = parseFloat(cs.paddingTop) || 0
+    const pr = parseFloat(cs.paddingRight) || 0
+    const pb = parseFloat(cs.paddingBottom) || 0
+    const pl = parseFloat(cs.paddingLeft) || 0
+    if (pt) result.paddingTop = pt
+    if (pr) result.paddingRight = pr
+    if (pb) result.paddingBottom = pb
+    if (pl) result.paddingLeft = pl
     return result
 }
