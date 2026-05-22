@@ -244,7 +244,12 @@ async function createTextNode(
 
     await applyTextSegments(node, layer)
 
-    node.textAutoResize = "WIDTH_AND_HEIGHT"
+    if (layer.layoutSizingHorizontal === "FILL") {
+        node.textAutoResize = "HEIGHT"
+        node.resize(Math.max(layer.width, 1), Math.max(layer.height, 1))
+    } else {
+        node.textAutoResize = "WIDTH_AND_HEIGHT"
+    }
 
     parent.appendChild(node)
     node.x = layer.x
@@ -261,6 +266,12 @@ async function createTextNode(
         }
         if (layer.layoutGrow !== undefined && layer.layoutGrow > 0) {
             node.layoutGrow = 1
+        }
+        if (layer.layoutSizingHorizontal) {
+            node.layoutSizingHorizontal = layer.layoutSizingHorizontal
+        }
+        if (layer.layoutSizingVertical) {
+            node.layoutSizingVertical = layer.layoutSizingVertical
         }
     } catch {
         // Not in auto-layout context

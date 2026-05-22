@@ -53,7 +53,25 @@ function convertElement(
     const hasBoxVisuals = hasFrameVisuals(cs)
 
     if (shouldConvertElementToText(el, cs, hasBoxVisuals, autoLayout)) {
-        return makeTextLayerFromElement(el, rect, parentRect)
+        const textLayer = makeTextLayerFromElement(el, rect, parentRect)
+        if (parentIsAutoLayout && !isOutOfFlow(cs)) {
+            const grow = parseFloat(cs.flexGrow) || 0
+            if (grow > 0) {
+                textLayer.layoutGrow = grow
+                if (parentLayoutMode === "HORIZONTAL") {
+                    textLayer.layoutSizingHorizontal = "FILL"
+                } else {
+                    textLayer.layoutSizingVertical = "FILL"
+                }
+            }
+            if (
+                parentLayoutMode === "VERTICAL" &&
+                shouldStretchCrossAxis(el, cs)
+            ) {
+                textLayer.layoutSizingHorizontal = "FILL"
+            }
+        }
+        return textLayer
     }
 
     const layer: LayerData = {
@@ -229,18 +247,47 @@ function makeMarginSpacer(
     position: "before" | "after",
     el: Element,
 ): LayerData {
+    const side =
+        position === "before"
+            ? parentLayoutMode === "VERTICAL"
+                ? "top"
+                : "left"
+            : parentLayoutMode === "VERTICAL"
+              ? "bottom"
+              : "right"
     return {
         type: "FRAME",
         x: 0,
         y: 0,
         width: parentLayoutMode === "HORIZONTAL" ? size : 1,
         height: parentLayoutMode === "VERTICAL" ? size : 1,
-        name: `margin-${position}.${elementName(el)}`,
+        name: `margin-${side}.${elementName(el)}`,
         layoutSizingHorizontal:
             parentLayoutMode === "HORIZONTAL" ? "FIXED" : "FILL",
         layoutSizingVertical:
             parentLayoutMode === "VERTICAL" ? "FIXED" : "FILL",
     }
+}
+
+function shouldStretchCrossAxis(
+    el: Element,
+    cs: CSSStyleDeclaration,
+): boolean {
+    const selfAlign = cs.alignSelf
+    if (
+        selfAlign !== "auto" &&
+        selfAlign !== "normal" &&
+        selfAlign !== "stretch"
+    ) {
+        return false
+    }
+    if (selfAlign === "stretch") return true
+
+    const parentEl = el.parentElement
+    if (!parentEl) return false
+    const parentCs = win(parentEl).getComputedStyle(parentEl)
+    const parentAlign = parentCs.alignItems
+    return parentAlign === "normal" || parentAlign === "stretch"
 }
 
 function isOutOfFlow(cs: CSSStyleDeclaration): boolean {
@@ -260,10 +307,6 @@ function hasFrameVisuals(cs: CSSStyleDeclaration): boolean {
         extractStrokes(cs) ||
         extractCornerRadii(cs) ||
         extractEffects(cs) ||
-        parseFloat(cs.paddingTop) ||
-        parseFloat(cs.paddingRight) ||
-        parseFloat(cs.paddingBottom) ||
-        parseFloat(cs.paddingLeft) ||
         cs.overflow === "hidden" ||
         cs.overflow === "clip"
     )
